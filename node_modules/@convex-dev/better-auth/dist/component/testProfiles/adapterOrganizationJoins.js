@@ -1,0 +1,5 @@
+import { createApi } from "../../client/index.js";
+import { organizationJoinsProfileOptions } from "./auth-options.profile-rename-joins.js";
+import schema from "./schema.profile-plugin-table.js";
+export const { create, findOne, findMany, updateOne, updateMany, deleteOne, deleteMany, } = createApi(schema, () => organizationJoinsProfileOptions);
+//# sourceMappingURL=adapterOrganizationJoins.js.map
