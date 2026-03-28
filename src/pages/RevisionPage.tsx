@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import {
   Brain,
@@ -17,9 +17,19 @@ import {
   Loader2,
   ArrowLeft,
   Sparkles,
+  Languages,
+  Play,
+  Pause,
+  Volume2,
+  Globe,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
+import {
+  KHAYA_LANGUAGES,
+  KHAYA_SPEAKERS,
+  type KhayaLanguage,
+} from "@/lib/khayaLanguages";
 
 const QUALITY_LABELS = [
   { value: 0, label: "Blackout", color: "bg-red-600" },
@@ -47,12 +57,29 @@ type LearnData = {
 
 type LearnPhase = "lesson" | "quiz" | "result";
 
+type TeachMeData = {
+  originalLesson: {
+    title: string;
+    keyPoints: string[];
+    explanation: string;
+  };
+  translatedLesson: {
+    title: string;
+    keyPoints: string[];
+    explanation: string;
+  };
+  audioUrl: string | null;
+  languageName: string;
+  isTranslated: boolean;
+};
+
 export default function RevisionPage() {
   const revisionQueue = useQuery(api.revision.getRevisionQueue);
   const allItems = useQuery(api.revision.getAllRevisionItems);
   const reviewItem = useMutation(api.revision.reviewItem);
   const deleteItem = useMutation(api.revision.deleteRevisionItem);
   const quickLearn = useAction(api.ai.quickLearnTopic);
+  const teachMeAction = useAction(api.khaya.teachMe);
 
   const [activeItem, setActiveItem] = useState<Id<"revisionItems"> | null>(
     null
@@ -69,6 +96,51 @@ export default function RevisionPage() {
   const [answerSubmitted, setAnswerSubmitted] = useState(false);
   const [quizScore, setQuizScore] = useState(0);
   const [quizAnswered, setQuizAnswered] = useState(0);
+
+  // Teach Me state
+  const [teachMeItemId, setTeachMeItemId] = useState<Id<"revisionItems"> | null>(null);
+  const [teachMeData, setTeachMeData] = useState<TeachMeData | null>(null);
+  const [teachMeLoading, setTeachMeLoading] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement>(null);
+
+  // Language & speaker preference (persisted in localStorage)
+  const [selectedLanguage, setSelectedLanguage] = useState<KhayaLanguage>(
+    () => {
+      const saved = localStorage.getItem("studyg-teach-language");
+      return KHAYA_LANGUAGES.find((l) => l.ttsCode === saved) ?? KHAYA_LANGUAGES[0];
+    }
+  );
+  const [selectedSpeaker, setSelectedSpeaker] = useState<string>(
+    () => localStorage.getItem("studyg-teach-speaker") ?? "female"
+  );
+
+  // Sync audio playing state with element events
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    const onPlay = () => setIsPlaying(true);
+    const onPause = () => setIsPlaying(false);
+    const onEnded = () => setIsPlaying(false);
+    el.addEventListener("play", onPlay);
+    el.addEventListener("pause", onPause);
+    el.addEventListener("ended", onEnded);
+    return () => {
+      el.removeEventListener("play", onPlay);
+      el.removeEventListener("pause", onPause);
+      el.removeEventListener("ended", onEnded);
+    };
+  }, [teachMeData]);
+
+  function handleLanguageChange(lang: KhayaLanguage) {
+    setSelectedLanguage(lang);
+    localStorage.setItem("studyg-teach-language", lang.ttsCode);
+  }
+
+  function handleSpeakerChange(speakerId: string) {
+    setSelectedSpeaker(speakerId);
+    localStorage.setItem("studyg-teach-speaker", speakerId);
+  }
 
   const displayItems = tab === "due" ? revisionQueue : allItems;
   const dueCount = revisionQueue?.length ?? 0;
@@ -164,6 +236,238 @@ export default function RevisionPage() {
       toast.error("Failed to record review");
     }
     exitQuickLearn();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Teach Me handlers
+  // ---------------------------------------------------------------------------
+
+  async function startTeachMe(
+    itemId: Id<"revisionItems">,
+    topic: string,
+    sourceSessionId: Id<"studySessions">
+  ) {
+    setTeachMeItemId(itemId);
+    setTeachMeLoading(true);
+    setTeachMeData(null);
+    setIsPlaying(false);
+
+    try {
+      const data = await teachMeAction({
+        topic,
+        sourceSessionId,
+        targetLanguage: selectedLanguage.ttsCode,
+        speakerId: selectedSpeaker,
+      });
+      setTeachMeData(data as TeachMeData);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to generate lesson. Please try again.");
+      setTeachMeItemId(null);
+    } finally {
+      setTeachMeLoading(false);
+    }
+  }
+
+  function exitTeachMe() {
+    audioRef.current?.pause();
+    setTeachMeItemId(null);
+    setTeachMeData(null);
+    setIsPlaying(false);
+  }
+
+  function toggleAudio() {
+    const el = audioRef.current;
+    if (!el) return;
+    if (isPlaying) {
+      el.pause();
+    } else {
+      el.play().catch(() => toast.error("Could not play audio."));
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Teach Me full-screen overlay
+  // -------------------------------------------------------------------------
+  if (teachMeItemId) {
+    const currentItem =
+      displayItems?.find((i) => i._id === teachMeItemId) ??
+      allItems?.find((i) => i._id === teachMeItemId);
+
+    if (teachMeLoading) {
+      return (
+        <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center gap-4 p-6">
+          <div className="w-16 h-16 rounded-2xl bg-teal-600/20 flex items-center justify-center">
+            <Languages className="w-8 h-8 text-teal-400 animate-pulse" />
+          </div>
+          <h2 className="text-lg font-semibold text-white">
+            Translating to {selectedLanguage.name}…
+          </h2>
+          <p className="text-sm text-gray-400 text-center max-w-xs">
+            Generating a lesson on{" "}
+            <span className="text-teal-400 font-medium">
+              {currentItem?.topic ?? "this topic"}
+            </span>{" "}
+            and converting it to audio.
+          </p>
+          <Loader2 className="w-5 h-5 animate-spin text-gray-500 mt-2" />
+        </div>
+      );
+    }
+
+    if (!teachMeData) return null;
+
+    const lesson = teachMeData.translatedLesson;
+
+    return (
+      <div className="min-h-screen bg-gray-950 flex flex-col">
+        {/* Header */}
+        <header className="bg-gray-900 border-b border-gray-800 px-4 py-3 flex items-center gap-3">
+          <button
+            onClick={exitTeachMe}
+            className="text-gray-400 hover:text-white transition-colors"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div className="flex-1 min-w-0">
+            <h1 className="font-semibold text-white text-sm truncate">
+              Teach Me: {currentItem?.topic}
+            </h1>
+            <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+              <Globe className="w-3 h-3" />
+              {teachMeData.languageName}
+              {!teachMeData.isTranslated && (
+                <span className="text-yellow-500 ml-1">(audio only)</span>
+              )}
+            </p>
+          </div>
+          <Volume2 className="w-5 h-5 text-teal-400 shrink-0" />
+        </header>
+
+        {/* Scrollable lesson content */}
+        <div className="flex-1 overflow-y-auto p-6 pb-44">
+          <div className="max-w-2xl mx-auto space-y-6">
+            {!teachMeData.isTranslated && (
+              <div className="bg-yellow-600/10 border border-yellow-600/30 rounded-xl px-4 py-3 text-xs text-yellow-400 flex items-start gap-2">
+                <Volume2 className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>
+                  Text translation is not supported for{" "}
+                  <strong>{teachMeData.languageName}</strong>. The audio is
+                  generated in {teachMeData.languageName} from the original
+                  English lesson.
+                </span>
+              </div>
+            )}
+
+            <h2 className="text-2xl font-bold text-white">{lesson.title}</h2>
+
+            {/* Key points */}
+            <div className="bg-teal-600/10 border border-teal-500/20 rounded-2xl p-5">
+              <h3 className="text-sm font-semibold text-teal-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                <Lightbulb className="w-4 h-4" />
+                Key Points
+              </h3>
+              <ul className="space-y-2">
+                {lesson.keyPoints.map((point, i) => (
+                  <li key={i} className="flex gap-3 text-sm text-gray-200">
+                    <span className="text-teal-400 font-bold shrink-0">
+                      {i + 1}.
+                    </span>
+                    {point}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Explanation */}
+            <div>
+              {lesson.explanation.split("\n").map((para, i) =>
+                para.trim() ? (
+                  <p
+                    key={i}
+                    className="text-gray-300 leading-relaxed mb-4 text-[15px]"
+                  >
+                    {para}
+                  </p>
+                ) : null
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Sticky audio player */}
+        <div className="fixed bottom-0 left-0 right-0 bg-gray-900/95 backdrop-blur border-t border-gray-800 p-4">
+          <div className="max-w-2xl mx-auto">
+            {teachMeData.audioUrl ? (
+              <>
+                {/* Hidden native audio element */}
+                <audio
+                  ref={audioRef}
+                  src={teachMeData.audioUrl}
+                  preload="auto"
+                />
+
+                {/* Controls row */}
+                <div className="flex items-center gap-4 mb-3">
+                  <button
+                    onClick={toggleAudio}
+                    className="w-12 h-12 rounded-full bg-teal-600 hover:bg-teal-500 flex items-center justify-center transition-colors shrink-0"
+                  >
+                    {isPlaying ? (
+                      <Pause className="w-5 h-5 text-white" />
+                    ) : (
+                      <Play className="w-5 h-5 text-white ml-0.5" />
+                    )}
+                  </button>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-white truncate">
+                      {currentItem?.topic}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {teachMeData.languageName} ·{" "}
+                      {KHAYA_SPEAKERS.find((s) => s.id === selectedSpeaker)
+                        ?.label ?? selectedSpeaker}{" "}
+                      voice
+                    </p>
+                  </div>
+                  {/* Speaker selector */}
+                  <select
+                    value={selectedSpeaker}
+                    onChange={(e) => handleSpeakerChange(e.target.value)}
+                    className="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                  >
+                    {KHAYA_SPEAKERS.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  onClick={exitTeachMe}
+                  className="w-full py-2.5 rounded-xl border border-gray-700 text-gray-400 hover:text-white hover:border-gray-600 text-sm transition-colors"
+                >
+                  Done
+                </button>
+              </>
+            ) : (
+              <div className="text-center py-2">
+                <p className="text-sm text-red-400 mb-2">
+                  Audio generation failed. You can still read the lesson above.
+                </p>
+                <button
+                  onClick={exitTeachMe}
+                  className="px-6 py-2 rounded-xl border border-gray-700 text-gray-400 hover:text-white text-sm transition-colors"
+                >
+                  Done
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -502,9 +806,51 @@ export default function RevisionPage() {
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-white mb-2">Revision Queue</h1>
-        <p className="text-gray-400">
+        <p className="text-gray-400 mb-4">
           Review topics based on spaced repetition to lock in your knowledge.
         </p>
+
+        {/* Language & speaker selector for "Teach Me" */}
+        <div className="flex flex-wrap items-center gap-3 bg-gray-900 border border-gray-800 rounded-2xl p-4">
+          <div className="flex items-center gap-2 text-sm text-gray-400 shrink-0">
+            <Globe className="w-4 h-4 text-teal-400" />
+            <span className="font-medium text-white">Learn in:</span>
+          </div>
+          <select
+            value={selectedLanguage.ttsCode}
+            onChange={(e) => {
+              const lang = KHAYA_LANGUAGES.find(
+                (l) => l.ttsCode === e.target.value
+              );
+              if (lang) handleLanguageChange(lang);
+            }}
+            className="flex-1 min-w-[160px] bg-gray-800 border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-teal-500"
+          >
+            {KHAYA_LANGUAGES.map((lang) => (
+              <option key={lang.ttsCode} value={lang.ttsCode}>
+                {lang.name}
+                {lang.translationCode ? "" : " (audio only)"}
+              </option>
+            ))}
+          </select>
+          <select
+            value={selectedSpeaker}
+            onChange={(e) => handleSpeakerChange(e.target.value)}
+            className="bg-gray-800 border border-gray-700 text-gray-300 text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-teal-500"
+          >
+            {KHAYA_SPEAKERS.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.label} voice
+              </option>
+            ))}
+          </select>
+          {!selectedLanguage.translationCode && (
+            <span className="text-xs text-yellow-500 flex items-center gap-1">
+              <Volume2 className="w-3 h-3" />
+              Audio only for this language
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Stats bar */}
@@ -638,10 +984,22 @@ export default function RevisionPage() {
                         e.stopPropagation();
                         startQuickLearn(item._id, item.topic, item.sourceSessionId);
                       }}
-                      className="w-full mb-4 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-gradient-to-r from-indigo-600/20 to-purple-600/20 border border-indigo-500/30 text-indigo-300 hover:from-indigo-600/30 hover:to-purple-600/30 hover:border-indigo-500/50 transition-all text-sm font-medium"
+                      className="w-full mb-3 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-gradient-to-r from-indigo-600/20 to-purple-600/20 border border-indigo-500/30 text-indigo-300 hover:from-indigo-600/30 hover:to-purple-600/30 hover:border-indigo-500/50 transition-all text-sm font-medium"
                     >
                       <Sparkles className="w-4 h-4" />
                       Quick Learn & Revise
+                    </button>
+
+                    {/* Teach Me button */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        startTeachMe(item._id, item.topic, item.sourceSessionId);
+                      }}
+                      className="w-full mb-4 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-gradient-to-r from-teal-600/20 to-emerald-600/20 border border-teal-500/30 text-teal-300 hover:from-teal-600/30 hover:to-emerald-600/30 hover:border-teal-500/50 transition-all text-sm font-medium"
+                    >
+                      <Languages className="w-4 h-4" />
+                      Teach Me in {selectedLanguage.name}
                     </button>
 
                     <p className="text-sm text-gray-300 mb-3 font-medium">

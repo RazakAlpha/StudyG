@@ -13,6 +13,7 @@ import type * as annotations from "../annotations.js";
 import type * as chat from "../chat.js";
 import type * as checkIns from "../checkIns.js";
 import type * as http from "../http.js";
+import type * as khaya from "../khaya.js";
 import type * as materials from "../materials.js";
 import type * as progress from "../progress.js";
 import type * as quizzes from "../quizzes.js";
@@ -32,6 +33,7 @@ declare const fullApi: ApiFromModules<{
   chat: typeof chat;
   checkIns: typeof checkIns;
   http: typeof http;
+  khaya: typeof khaya;
   materials: typeof materials;
   progress: typeof progress;
   quizzes: typeof quizzes;
