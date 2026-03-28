@@ -44,7 +44,7 @@ export default function MaterialUpload({ sessionId, onSuccess }: Props) {
   const [isUploading, setIsUploading] = useState(false);
 
   // Library state
-  const [selectedFile, setSelectedFile] = useState<(typeof myFiles)[0] | null>(
+  const [selectedFile, setSelectedFile] = useState<NonNullable<typeof myFiles>[0] | null>(
     null
   );
   const [libTitle, setLibTitle] = useState("");
