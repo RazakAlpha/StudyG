@@ -2,6 +2,7 @@ import { internalMutation, internalQuery, mutation, query, action } from "./_gen
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { authComponent } from "./betterAuth/auth";
+import { syncProgressStats } from "./stats";
 
 export const generateQuiz = action({
   args: {
@@ -195,6 +196,8 @@ export const submitQuizAttempt = mutation({
       correctAnswers: correctCount,
       weakTopics,
     });
+
+    await syncProgressStats(ctx, user._id, 0, 0, false, score);
 
     // Create revision items for weak topics
     for (const topic of weakTopics) {

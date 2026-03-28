@@ -1,14 +1,13 @@
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Link, useNavigate } from "react-router-dom";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import {
   Plus,
   Clock,
   BookOpen,
   Brain,
-  BarChart3,
   TrendingUp,
   Flame,
   Target,
@@ -20,6 +19,10 @@ import {
   Pause,
   Globe,
   ArrowRight,
+  Play,
+  FileText,
+  Timer,
+  Zap,
 } from "lucide-react";
 import { useAuthSession } from "@/hooks/useAuthSession";
 import { formatDuration, formatDate } from "@/lib/utils";
@@ -68,6 +71,24 @@ function StatCard({
   );
 }
 
+function LiveElapsed({ startMs }: { startMs: number }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const elapsed = Math.max(0, Math.floor((now - startMs) / 1000));
+  const h = Math.floor(elapsed / 3600);
+  const m = Math.floor((elapsed % 3600) / 60);
+  const s = elapsed % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    <span className="font-mono tabular-nums text-white">
+      {h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`}
+    </span>
+  );
+}
+
 export default function DashboardPage() {
   const { user } = useAuthSession();
   const navigate = useNavigate();
@@ -79,6 +100,8 @@ export default function DashboardPage() {
   const myActiveCreatedSession = useQuery(
     api.sessions.getMyActiveCreatedSession
   );
+  const todayStats = useQuery(api.stats.getTodayStats);
+  const activeStudying = useQuery(api.stats.getActiveStudyingSummary);
 
   const joinByInviteCode = useMutation(api.sessions.joinByInviteCode);
   const joinPublicSession = useMutation(api.sessions.joinPublicSession);
@@ -87,7 +110,9 @@ export default function DashboardPage() {
   const [inviteCodeInput, setInviteCodeInput] = useState("");
   const [isJoining, setIsJoining] = useState(false);
   const [showPauseModal, setShowPauseModal] = useState(false);
-  const [pendingJoinAction, setPendingJoinAction] = useState<(() => Promise<void>) | null>(null);
+  const [pendingJoinAction, setPendingJoinAction] = useState<
+    (() => Promise<void>) | null
+  >(null);
 
   const recentSessions = (sessions?.slice(0, 5) ?? []).filter(
     (s): s is NonNullable<typeof s> => s !== null
@@ -97,14 +122,15 @@ export default function DashboardPage() {
   const chartData =
     activityLog?.map((log) => ({
       date: log.date.slice(5),
-      minutes: log.minutesStudied,
+      minutes: Math.round(log.minutesStudied),
       pages: log.pagesRead,
     })) ?? [];
 
   const weeklyProgress = stats
     ? Math.min(
         100,
-        ((stats.weeklyMinutesThisWeek ?? 0) / (stats.weeklyGoalMinutes || 300)) *
+        ((stats.weeklyMinutesThisWeek ?? 0) /
+          (stats.weeklyGoalMinutes || 300)) *
           100
       )
     : 0;
@@ -203,20 +229,151 @@ export default function DashboardPage() {
         </Link>
       </div>
 
+      {/* Active Session Banner */}
+      {activeStudying && (
+        <Link
+          to={`/sessions/${activeStudying.sessionId}`}
+          className="block mb-6 bg-gradient-to-r from-indigo-600/20 via-purple-600/15 to-indigo-600/20 border border-indigo-500/30 rounded-2xl p-5 hover:border-indigo-500/50 transition-colors group"
+        >
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-10 h-10 bg-indigo-600/20 rounded-xl flex items-center justify-center">
+                  <Play className="w-4 h-4 text-indigo-400" />
+                </div>
+                <span className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border-2 border-gray-950 animate-pulse" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-semibold text-white">
+                    {activeStudying.title}
+                  </h3>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-green-600/20 text-green-400">
+                    live
+                  </span>
+                </div>
+                {activeStudying.currentMaterialTitle && (
+                  <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+                    <FileText className="w-3 h-3" />
+                    {activeStudying.currentMaterialTitle} — page{" "}
+                    {activeStudying.currentPage}
+                  </p>
+                )}
+              </div>
+            </div>
+            <ChevronRight className="w-5 h-5 text-gray-500 group-hover:text-indigo-400 transition-colors" />
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <p className="text-xs text-gray-500 mb-1">Pages Read</p>
+              <p className="text-lg font-bold text-white">
+                {activeStudying.totalPagesRead}
+                {activeStudying.sessionTotalPages > 0 && (
+                  <span className="text-sm font-normal text-gray-500">
+                    /{activeStudying.sessionTotalPages}
+                  </span>
+                )}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 mb-1">Time Spent</p>
+              <p className="text-lg font-bold text-white">
+                {formatDuration(activeStudying.totalTimeSpentMinutes)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 mb-1">Progress</p>
+              <p className="text-lg font-bold text-white">
+                {Math.round(activeStudying.percentage)}%
+              </p>
+            </div>
+          </div>
+
+          {activeStudying.sessionTotalPages > 0 && (
+            <div className="mt-3 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-500"
+                style={{ width: `${activeStudying.percentage}%` }}
+              />
+            </div>
+          )}
+        </Link>
+      )}
+
+      {/* Today's Activity Bar */}
+      {todayStats && (todayStats.pagesRead > 0 || todayStats.minutesStudied > 0) && (
+        <div className="mb-6 bg-gray-900 border border-gray-800 rounded-2xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Zap className="w-4 h-4 text-yellow-400" />
+            <h3 className="font-semibold text-white text-sm">Today</h3>
+          </div>
+          <div className="flex items-center gap-6 flex-wrap">
+            <div className="flex items-center gap-2">
+              <Timer className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="text-sm text-gray-300">
+                {formatDuration(todayStats.minutesStudied)}{" "}
+                <span className="text-gray-500">studied</span>
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <BookOpen className="w-3.5 h-3.5 text-green-400" />
+              <span className="text-sm text-gray-300">
+                {todayStats.pagesRead}{" "}
+                <span className="text-gray-500">pages</span>
+              </span>
+            </div>
+            {todayStats.sessionsCompleted > 0 && (
+              <div className="flex items-center gap-2">
+                <Target className="w-3.5 h-3.5 text-purple-400" />
+                <span className="text-sm text-gray-300">
+                  {todayStats.sessionsCompleted}{" "}
+                  <span className="text-gray-500">
+                    session{todayStats.sessionsCompleted !== 1 ? "s" : ""}{" "}
+                    completed
+                  </span>
+                </span>
+              </div>
+            )}
+            {todayStats.quizzesTaken > 0 && (
+              <div className="flex items-center gap-2">
+                <Brain className="w-3.5 h-3.5 text-yellow-400" />
+                <span className="text-sm text-gray-300">
+                  {todayStats.quizzesTaken}{" "}
+                  <span className="text-gray-500">
+                    quiz{todayStats.quizzesTaken !== 1 ? "zes" : ""}
+                  </span>
+                  {todayStats.averageScore != null && (
+                    <span className="text-gray-500">
+                      {" "}
+                      ({Math.round(todayStats.averageScore)}% avg)
+                    </span>
+                  )}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Stats grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <StatCard
           icon={Flame}
           label="Day Streak"
           value={stats?.currentStreak ?? 0}
-          sub="Keep it up!"
+          sub={
+            (stats?.longestStreak ?? 0) > 0
+              ? `Best: ${stats?.longestStreak} days`
+              : "Keep it up!"
+          }
           color="yellow"
         />
         <StatCard
           icon={Clock}
           label="Total Hours"
           value={formatDuration(stats?.totalTimeMinutes ?? 0)}
-          sub="Study time"
+          sub={`${stats?.totalSessionsCompleted ?? 0} sessions completed`}
           color="indigo"
         />
         <StatCard
@@ -245,9 +402,25 @@ export default function DashboardPage() {
             <ResponsiveContainer width="100%" height={200}>
               <AreaChart data={chartData}>
                 <defs>
-                  <linearGradient id="minutesGrad" x1="0" y1="0" x2="0" y2="1">
+                  <linearGradient
+                    id="minutesGrad"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
                     <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
                     <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient
+                    id="pagesGrad"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.2} />
+                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <XAxis
@@ -268,7 +441,10 @@ export default function DashboardPage() {
                     borderRadius: "8px",
                     color: "#f9fafb",
                   }}
-                  formatter={(v) => [`${v} min`, "Study time"]}
+                  formatter={(v: number, name: string) => [
+                    name === "minutes" ? `${v} min` : `${v} pages`,
+                    name === "minutes" ? "Study time" : "Pages read",
+                  ]}
                 />
                 <Area
                   type="monotone"
@@ -276,6 +452,13 @@ export default function DashboardPage() {
                   stroke="#6366f1"
                   strokeWidth={2}
                   fill="url(#minutesGrad)"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="pages"
+                  stroke="#22c55e"
+                  strokeWidth={1.5}
+                  fill="url(#pagesGrad)"
                 />
               </AreaChart>
             </ResponsiveContainer>
@@ -344,7 +527,7 @@ export default function DashboardPage() {
                 </Link>
               </>
             ) : (
-              <p className="text-sm text-gray-500">All caught up! 🎉</p>
+              <p className="text-sm text-gray-500">All caught up!</p>
             )}
           </div>
         </div>

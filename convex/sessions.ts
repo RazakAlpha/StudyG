@@ -2,6 +2,7 @@ import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { authComponent } from "./betterAuth/auth";
+import { syncProgressStats } from "./stats";
 
 // Generate a random 6-char invite code
 function generateInviteCode(): string {
@@ -129,12 +130,20 @@ export const endSession = mutation({
       actualEnd: Date.now(),
     });
 
-    // Cancel pending check-in if exists
     if (session.checkInScheduledId) {
       await ctx.scheduler.cancel(session.checkInScheduledId);
     }
 
-    // Add system message
+    // Record completion for every member so each user's stats update
+    const members = await ctx.db
+      .query("sessionMembers")
+      .withIndex("by_session", (q) => q.eq("sessionId", args.sessionId))
+      .collect();
+
+    for (const m of members) {
+      await syncProgressStats(ctx, m.userId, 0, 0, true);
+    }
+
     await ctx.db.insert("chatMessages", {
       sessionId: args.sessionId,
       userId: "system",

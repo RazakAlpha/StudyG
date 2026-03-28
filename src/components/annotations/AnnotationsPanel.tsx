@@ -14,6 +14,7 @@ interface Props {
   currentPage: number;
   addAnnotationPage: number | null;
   onAddClose: () => void;
+  onClose?: () => void;
 }
 
 export default function AnnotationsPanel({
@@ -22,6 +23,7 @@ export default function AnnotationsPanel({
   currentPage,
   addAnnotationPage,
   onAddClose,
+  onClose,
 }: Props) {
   const { user } = useAuthSession();
   const annotations = useQuery(api.annotations.getPageAnnotations, {
@@ -77,6 +79,14 @@ export default function AnnotationsPanel({
             Notes - Page {currentPage}
           </span>
         </div>
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       {/* Add note form */}

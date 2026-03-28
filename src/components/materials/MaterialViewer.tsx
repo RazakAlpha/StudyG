@@ -46,6 +46,7 @@ export default function MaterialViewer({
   const myProgress = useQuery(api.progress.getMyProgress, { sessionId });
 
   const [currentPage, setCurrentPage] = useState(1);
+  const [pageInput, setPageInput] = useState("1");
   const [zoom, setZoom] = useState(100);
   const [showAnnotations, setShowAnnotations] = useState(false);
   const [addAnnotationPage, setAddAnnotationPage] = useState<number | null>(
@@ -86,6 +87,7 @@ export default function MaterialViewer({
   useEffect(() => {
     if (progressForMaterial?.currentPage) {
       setCurrentPage(progressForMaterial.currentPage);
+      setPageInput(String(progressForMaterial.currentPage));
     }
   }, [materialId]);
 
@@ -97,8 +99,9 @@ export default function MaterialViewer({
   }, [currentPage, saveProgress]);
 
   function goToPage(page: number) {
-    if (page < 1 || page > totalPages) return;
+    if (!Number.isFinite(page) || page < 1 || page > totalPages) return;
     setCurrentPage(page);
+    setPageInput(String(page));
   }
 
   const absolutePage = toAbsolutePage(currentPage);
@@ -132,8 +135,21 @@ export default function MaterialViewer({
             <div className="flex items-center gap-1.5 text-sm text-gray-400">
               <input
                 type="number"
-                value={currentPage}
-                onChange={(e) => goToPage(Number(e.target.value))}
+                value={pageInput}
+                onChange={(e) => setPageInput(e.target.value)}
+                onBlur={() => {
+                  const num = Number(pageInput);
+                  if (Number.isFinite(num) && num >= 1 && num <= totalPages) {
+                    goToPage(num);
+                  } else {
+                    setPageInput(String(currentPage));
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    (e.target as HTMLInputElement).blur();
+                  }
+                }}
                 min={1}
                 max={totalPages}
                 className="w-12 bg-gray-800 text-center text-white text-sm px-2 py-1 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500"
@@ -229,6 +245,7 @@ export default function MaterialViewer({
                 />
               ) : materialData.type === "pdf" ? (
                 <iframe
+                  key={`pdf-page-${absolutePage}`}
                   src={`${urlData}#page=${absolutePage}`}
                   className="w-full h-[80vh] rounded-lg border border-gray-800"
                   title={materialData.title}
@@ -249,30 +266,58 @@ export default function MaterialViewer({
         </div>
       </div>
 
-      {/* Annotations sidebar */}
+      {/* Annotations sidebar – desktop: side column, mobile: full-screen overlay */}
       {showAnnotations && (
-        <div className="w-72 border-l border-gray-800 bg-gray-900 flex flex-col shrink-0">
-          <AnnotationsPanel
-            materialId={materialId}
-            sessionId={sessionId}
-            currentPage={absolutePage}
-            addAnnotationPage={addAnnotationPage}
-            onAddClose={() => setAddAnnotationPage(null)}
-          />
-        </div>
+        <>
+          {/* Mobile overlay */}
+          <div className="fixed inset-0 z-50 bg-gray-900 flex flex-col sm:hidden">
+            <AnnotationsPanel
+              materialId={materialId}
+              sessionId={sessionId}
+              currentPage={absolutePage}
+              addAnnotationPage={addAnnotationPage}
+              onAddClose={() => setAddAnnotationPage(null)}
+              onClose={() => setShowAnnotations(false)}
+            />
+          </div>
+          {/* Desktop column */}
+          <div className="hidden sm:flex w-72 border-l border-gray-800 bg-gray-900 flex-col shrink-0">
+            <AnnotationsPanel
+              materialId={materialId}
+              sessionId={sessionId}
+              currentPage={absolutePage}
+              addAnnotationPage={addAnnotationPage}
+              onAddClose={() => setAddAnnotationPage(null)}
+              onClose={() => setShowAnnotations(false)}
+            />
+          </div>
+        </>
       )}
 
-      {/* Add annotation modal triggered inline */}
+      {/* Add annotation panel when annotations list is hidden */}
       {addAnnotationPage !== null && !showAnnotations && (
-        <div className="w-72 border-l border-gray-800 bg-gray-900 flex flex-col shrink-0">
-          <AnnotationsPanel
-            materialId={materialId}
-            sessionId={sessionId}
-            currentPage={absolutePage}
-            addAnnotationPage={addAnnotationPage}
-            onAddClose={() => setAddAnnotationPage(null)}
-          />
-        </div>
+        <>
+          <div className="fixed inset-0 z-50 bg-gray-900 flex flex-col sm:hidden">
+            <AnnotationsPanel
+              materialId={materialId}
+              sessionId={sessionId}
+              currentPage={absolutePage}
+              addAnnotationPage={addAnnotationPage}
+              onAddClose={() => setAddAnnotationPage(null)}
+              onClose={() => setAddAnnotationPage(null)}
+            />
+          </div>
+          <div className="hidden sm:flex w-72 border-l border-gray-800 bg-gray-900 flex-col shrink-0">
+            <AnnotationsPanel
+              materialId={materialId}
+              sessionId={sessionId}
+              currentPage={absolutePage}
+              addAnnotationPage={addAnnotationPage}
+              onAddClose={() => setAddAnnotationPage(null)}
+              onClose={() => setAddAnnotationPage(null)}
+            />
+          </div>
+        </>
       )}
     </div>
   );

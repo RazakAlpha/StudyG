@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { authComponent } from "./betterAuth/auth";
+import { syncProgressStats } from "./stats";
 
 function effectivePageCount(
   totalPages: number | undefined,
@@ -34,13 +35,20 @@ export const updateProgress = mutation({
       )
       .first();
 
+    let pagesDelta = 0;
+    let timeDeltaMinutes = 0;
+
     if (existing) {
       const pagesVisited = Array.from(
         new Set([...existing.pagesVisited, args.currentPage])
       );
-      const timeSpent =
-        existing.timeSpentSeconds +
-        Math.round((now - existing.lastUpdatedAt) / 1000);
+      const timeDeltaSeconds = Math.round(
+        (now - existing.lastUpdatedAt) / 1000
+      );
+      const timeSpent = existing.timeSpentSeconds + timeDeltaSeconds;
+
+      pagesDelta = pagesVisited.length - existing.pagesVisited.length;
+      timeDeltaMinutes = timeDeltaSeconds / 60;
 
       await ctx.db.patch(existing._id, {
         currentPage: args.currentPage,
@@ -51,6 +59,8 @@ export const updateProgress = mutation({
           pagesVisited.length >= args.totalPages ? now : existing.completedAt,
       });
     } else {
+      pagesDelta = 1;
+
       await ctx.db.insert("progress", {
         sessionId: args.sessionId,
         materialId: args.materialId,
@@ -77,6 +87,16 @@ export const updateProgress = mutation({
         currentPage: args.currentPage,
         lastHeartbeat: now,
       });
+    }
+
+    if (pagesDelta > 0 || timeDeltaMinutes > 0) {
+      await syncProgressStats(
+        ctx,
+        user._id,
+        timeDeltaMinutes,
+        pagesDelta,
+        false
+      );
     }
   },
 });
