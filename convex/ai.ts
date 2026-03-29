@@ -1,16 +1,91 @@
 "use node";
 
+import { createHash } from "crypto";
 import { action, internalAction } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
+import type { Doc } from "./_generated/dataModel";
 import OpenAI from "openai";
 import { authComponent } from "./betterAuth/auth";
+
+type QuickLearnTopicResult = {
+  lesson: {
+    title: string;
+    keyPoints: string[];
+    explanation: string;
+  };
+  questions: Array<{
+    id: string;
+    question: string;
+    options: string[];
+    correctAnswer: string;
+    explanation: string;
+  }>;
+  fromCache: boolean;
+};
 
 function createOpenAIClient(): OpenAI {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY environment variable is not set");
   return new OpenAI({ apiKey });
 }
+
+function normalizeQuickLearnTopicKey(topic: string): string {
+  return topic.trim().replace(/\s+/g, " ");
+}
+
+/**
+ * Fetches files from storage and fills `extractedText` when missing (PDF and plain text).
+ * The app does not always call `updateMaterialText` from the client; quiz generation needs text server-side.
+ */
+export const ensureMaterialsExtractedText = internalAction({
+  args: {
+    sessionId: v.id("studySessions"),
+    materialId: v.optional(v.id("materials")),
+  },
+  handler: async (ctx, args) => {
+    const materials: Doc<"materials">[] = await ctx.runQuery(
+      internal.materials.getSessionMaterialTexts,
+      args
+    );
+    const { getDocumentProxy, extractText } = await import("unpdf");
+
+    for (const m of materials) {
+      if ((m.extractedText ?? "").trim()) continue;
+
+      const url = await ctx.storage.getUrl(m.storageId);
+      if (!url) continue;
+
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const arrayBuffer = await res.arrayBuffer();
+      const mime = m.mimeType ?? "";
+
+      let extracted = "";
+
+      if (m.type === "pdf" || mime === "application/pdf") {
+        try {
+          const pdf = await getDocumentProxy(new Uint8Array(arrayBuffer));
+          const { text } = await extractText(pdf, { mergePages: true });
+          extracted = (text ?? "").trim();
+        } catch {
+          extracted = "";
+        }
+      } else if (mime.startsWith("text/") || mime === "application/json") {
+        extracted = Buffer.from(arrayBuffer).toString("utf-8").trim();
+      } else if (m.type === "document" && mime.includes("text")) {
+        extracted = Buffer.from(arrayBuffer).toString("utf-8").trim();
+      }
+
+      if (extracted) {
+        await ctx.runMutation(internal.materials.setMaterialExtractedTextInternal, {
+          materialId: m._id,
+          extractedText: extracted,
+        });
+      }
+    }
+  },
+});
 
 // ---------------------------------------------------------------------------
 // Internal primitives — called by other Convex functions, not exposed publicly
@@ -31,9 +106,9 @@ export const generateQuizQuestions = internalAction({
     const count = args.questionCount ?? 8;
     const topicClause = args.topic ? ` about "${args.topic}"` : "";
 
-    const prompt = `You are an expert educator. Based on the following study material${topicClause}, generate ${count} quiz questions to test comprehension.
+    const prompt = `You are an expert educator. Based on the following context${topicClause}, generate ${count} quiz questions to test comprehension. Base questions on the extracted study text (not filenames). The context may begin with the study session name and description, then the material text.
 
-Material:
+Context:
 ${args.context}
 
 Generate a JSON array of questions with this exact format (no markdown, just pure JSON).
@@ -348,8 +423,9 @@ export const quickLearnTopic = action({
   args: {
     topic: v.string(),
     sourceSessionId: v.id("studySessions"),
+    rebuild: v.optional(v.boolean()),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<QuickLearnTopicResult> => {
     const user = await authComponent.getAuthUser(ctx);
     if (!user) throw new Error("Not authenticated");
 
@@ -362,6 +438,26 @@ export const quickLearnTopic = action({
       .map((m: any) => `[${m.title}]\n${m.extractedText ?? ""}`)
       .join("\n\n")
       .substring(0, 8000);
+
+    const topicKey = normalizeQuickLearnTopicKey(args.topic);
+    const contextFingerprint = createHash("sha256").update(context).digest("hex");
+
+    if (!args.rebuild) {
+      const cached: Doc<"quickLearnTopicCache"> | null = await ctx.runQuery(
+        internal.quickLearnCache.getQuickLearnCache,
+        {
+          sourceSessionId: args.sourceSessionId,
+          topicKey,
+        }
+      );
+      if (cached && cached.contextFingerprint === contextFingerprint) {
+        return {
+          lesson: cached.lesson,
+          questions: cached.questions,
+          fromCache: true,
+        };
+      }
+    }
 
     const openai = createOpenAIClient();
 
@@ -428,7 +524,18 @@ IMPORTANT: Generate exactly 3 MCQ questions. Make the lesson educational and the
       }>;
     };
 
-    return parsed;
+    await ctx.runMutation(internal.quickLearnCache.upsertQuickLearnCache, {
+      sourceSessionId: args.sourceSessionId,
+      topicKey,
+      contextFingerprint,
+      lesson: parsed.lesson,
+      questions: parsed.questions,
+    });
+
+    return {
+      ...parsed,
+      fromCache: false,
+    };
   },
 });
 

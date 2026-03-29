@@ -1,4 +1,4 @@
-import { internalQuery, mutation, query } from "./_generated/server";
+import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { authComponent } from "./betterAuth/auth";
 
@@ -217,6 +217,19 @@ export const updateMaterialText = mutation({
     await ctx.db.patch(args.materialId, {
       extractedText: args.extractedText,
       ...(args.totalPages ? { totalPages: args.totalPages } : {}),
+    });
+  },
+});
+
+/** Used by server-side extraction (e.g. quiz generation) — not callable from clients. */
+export const setMaterialExtractedTextInternal = internalMutation({
+  args: {
+    materialId: v.id("materials"),
+    extractedText: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.materialId, {
+      extractedText: args.extractedText,
     });
   },
 });

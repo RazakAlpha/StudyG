@@ -23,7 +23,18 @@ export const generateQuiz = action({
       }
     );
 
-    const materials: any[] = await ctx.runQuery(
+    const sessionMeta = await ctx.runQuery(internal.quizzes.getSessionMetaForQuiz, {
+      sessionId: args.sessionId,
+    });
+    if (!sessionMeta) {
+      await ctx.runMutation(internal.quizzes.updateQuizStatus, {
+        quizId,
+        status: "failed",
+      });
+      throw new Error("Study session not found.");
+    }
+
+    let materials: any[] = await ctx.runQuery(
       internal.quizzes.getMaterialsForQuiz,
       {
         sessionId: args.sessionId,
@@ -31,20 +42,47 @@ export const generateQuiz = action({
       }
     );
 
-    const context = materials
-      .map((m: any) => `Title: ${m.title}\n${m.extractedText ?? ""}`)
-      .join("\n\n")
-      .substring(0, 8000);
+    let materialText = materials
+      .map((m: any) => (m.extractedText ?? "").trim())
+      .filter(Boolean)
+      .join("\n\n");
 
-    if (!context.trim()) {
+    if (!materialText) {
+      await ctx.runAction(internal.ai.ensureMaterialsExtractedText, {
+        sessionId: args.sessionId,
+        materialId: args.materialId,
+      });
+      materials = await ctx.runQuery(internal.quizzes.getMaterialsForQuiz, {
+        sessionId: args.sessionId,
+        materialId: args.materialId,
+      });
+      materialText = materials
+        .map((m: any) => (m.extractedText ?? "").trim())
+        .filter(Boolean)
+        .join("\n\n");
+    }
+
+    if (!materialText) {
       await ctx.runMutation(internal.quizzes.updateQuizStatus, {
         quizId,
         status: "failed",
       });
       throw new Error(
-        "No text content found in materials. Please ensure materials have extractable text."
+        "No extractable text found in your materials. PDFs and text files are supported; image-only uploads cannot be used for quizzes yet."
       );
     }
+
+    const sessionBlock = [
+      `Session: ${sessionMeta.title}`,
+      ...(sessionMeta.description?.trim()
+        ? [`About this session: ${sessionMeta.description.trim()}`]
+        : []),
+      "",
+      "Study material:",
+      materialText,
+    ].join("\n");
+
+    const context = sessionBlock.substring(0, 8000);
 
     try {
       const questions = await ctx.runAction(internal.ai.generateQuizQuestions, {
@@ -84,6 +122,18 @@ export const createQuizPlaceholder = internalMutation({
       questions: [],
       status: "generating",
     });
+  },
+});
+
+export const getSessionMetaForQuiz = internalQuery({
+  args: { sessionId: v.id("studySessions") },
+  handler: async (ctx, args) => {
+    const session = await ctx.db.get(args.sessionId);
+    if (!session) return null;
+    return {
+      title: session.title,
+      description: session.description,
+    };
   },
 });
 

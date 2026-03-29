@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useAction } from "convex/react";
+import { useQuery, useMutation, useAction, useConvex } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
 import { useState, useRef, useEffect } from "react";
@@ -22,6 +22,7 @@ import {
   Pause,
   Volume2,
   Globe,
+  RefreshCw,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
@@ -71,9 +72,36 @@ type TeachMeData = {
   audioUrl: string | null;
   languageName: string;
   isTranslated: boolean;
+  fromCache?: boolean;
 };
 
+function CacheStatusBadge({
+  revisionItemId,
+  targetLanguage,
+  speakerId,
+}: {
+  revisionItemId: Id<"revisionItems">;
+  targetLanguage: string;
+  speakerId: string;
+}) {
+  const cached = useQuery(api.khaya.getCachedLesson, {
+    revisionItemId,
+    targetLanguage,
+    speakerId,
+  });
+
+  if (cached?.exists) {
+    return (
+      <span className="ml-auto bg-teal-600/20 text-teal-400 px-2 py-0.5 rounded text-xs">
+        Saved
+      </span>
+    );
+  }
+  return null;
+}
+
 export default function RevisionPage() {
+  const convex = useConvex();
   const revisionQueue = useQuery(api.revision.getRevisionQueue);
   const allItems = useQuery(api.revision.getAllRevisionItems);
   const reviewItem = useMutation(api.revision.reviewItem);
@@ -245,7 +273,8 @@ export default function RevisionPage() {
   async function startTeachMe(
     itemId: Id<"revisionItems">,
     topic: string,
-    sourceSessionId: Id<"studySessions">
+    sourceSessionId: Id<"studySessions">,
+    forceRegenerate = false
   ) {
     setTeachMeItemId(itemId);
     setTeachMeLoading(true);
@@ -253,11 +282,26 @@ export default function RevisionPage() {
     setIsPlaying(false);
 
     try {
+      // Read from DB first so repeat opens use the stored lesson (no action / no regeneration).
+      if (!forceRegenerate) {
+        const fromDb = await convex.query(api.khaya.getTeachMeLesson, {
+          revisionItemId: itemId,
+          targetLanguage: selectedLanguage.ttsCode,
+          speakerId: selectedSpeaker,
+        });
+        if (fromDb) {
+          setTeachMeData(fromDb as TeachMeData);
+          return;
+        }
+      }
+
       const data = await teachMeAction({
+        revisionItemId: itemId,
         topic,
         sourceSessionId,
         targetLanguage: selectedLanguage.ttsCode,
         speakerId: selectedSpeaker,
+        forceRegenerate,
       });
       setTeachMeData(data as TeachMeData);
     } catch (err) {
@@ -339,8 +383,31 @@ export default function RevisionPage() {
               {!teachMeData.isTranslated && (
                 <span className="text-yellow-500 ml-1">(audio only)</span>
               )}
+              {teachMeData.fromCache && (
+                <span className="ml-1 bg-teal-600/20 text-teal-400 px-1.5 py-0.5 rounded text-xs">
+                  Cached
+                </span>
+              )}
             </p>
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (teachMeItemId && currentItem) {
+                startTeachMe(
+                  teachMeItemId,
+                  currentItem.topic,
+                  currentItem.sourceSessionId,
+                  true
+                );
+              }
+            }}
+            className="flex items-center gap-1.5 text-gray-400 hover:text-white transition-colors px-2 py-1 rounded-lg hover:bg-gray-800 shrink-0"
+            title="Rebuild lesson and audio (ignores saved copy)"
+          >
+            <RefreshCw className="w-4 h-4" />
+            <span className="text-xs font-medium hidden sm:inline">Rebuild</span>
+          </button>
           <Volume2 className="w-5 h-5 text-teal-400 shrink-0" />
         </header>
 
@@ -1000,6 +1067,13 @@ export default function RevisionPage() {
                     >
                       <Languages className="w-4 h-4" />
                       Teach Me in {selectedLanguage.name}
+                      {isActive && (
+                        <CacheStatusBadge
+                          revisionItemId={item._id}
+                          targetLanguage={selectedLanguage.ttsCode}
+                          speakerId={selectedSpeaker}
+                        />
+                      )}
                     </button>
 
                     <p className="text-sm text-gray-300 mb-3 font-medium">

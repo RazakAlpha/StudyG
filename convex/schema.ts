@@ -265,4 +265,54 @@ export default defineSchema({
   })
     .index("by_user", ["userId"])
     .index("by_user_date", ["userId", "date"]),
+
+  // Cached Quick Learn lesson + quiz per session topic (invalidates when material context changes)
+  quickLearnTopicCache: defineTable({
+    sourceSessionId: v.id("studySessions"),
+    topicKey: v.string(),
+    contextFingerprint: v.string(),
+    lesson: v.object({
+      title: v.string(),
+      keyPoints: v.array(v.string()),
+      explanation: v.string(),
+    }),
+    questions: v.array(
+      v.object({
+        id: v.string(),
+        question: v.string(),
+        options: v.array(v.string()),
+        correctAnswer: v.string(),
+        explanation: v.string(),
+      })
+    ),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_session_topic", ["sourceSessionId", "topicKey"]),
+
+  // Cached synthesized lessons per user/revision item/language/speaker
+  teachMeLessons: defineTable({
+    userId: v.string(),
+    revisionItemId: v.id("revisionItems"),
+    targetLanguage: v.string(),
+    speakerId: v.string(),
+    originalLesson: v.object({
+      title: v.string(),
+      keyPoints: v.array(v.string()),
+      explanation: v.string(),
+    }),
+    translatedLesson: v.object({
+      title: v.string(),
+      keyPoints: v.array(v.string()),
+      explanation: v.string(),
+    }),
+    isTranslated: v.boolean(),
+    languageName: v.string(),
+    audioStorageId: v.id("_storage"),
+    createdAt: v.number(),
+  }).index("by_user_item_lang_speaker", [
+    "userId",
+    "revisionItemId",
+    "targetLanguage",
+    "speakerId",
+  ]),
 });

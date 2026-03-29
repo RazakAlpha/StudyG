@@ -16,6 +16,7 @@ import type * as http from "../http.js";
 import type * as khaya from "../khaya.js";
 import type * as materials from "../materials.js";
 import type * as progress from "../progress.js";
+import type * as quickLearnCache from "../quickLearnCache.js";
 import type * as quizzes from "../quizzes.js";
 import type * as revision from "../revision.js";
 import type * as sessions from "../sessions.js";
@@ -36,6 +37,7 @@ declare const fullApi: ApiFromModules<{
   khaya: typeof khaya;
   materials: typeof materials;
   progress: typeof progress;
+  quickLearnCache: typeof quickLearnCache;
   quizzes: typeof quizzes;
   revision: typeof revision;
   sessions: typeof sessions;
