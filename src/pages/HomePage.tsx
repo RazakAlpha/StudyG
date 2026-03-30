@@ -68,8 +68,8 @@ export default function HomePage() {
       <header className="border-b border-gray-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-              <BookOpen className="w-4 h-4 text-white" />
+            <div className="w-8 h-8 bg-transparent rounded-lg flex items-center justify-center">
+                <img src="/studyglogo.png" alt="StudyG" className="w-full h-full object-cover" />
             </div>
             <span className="text-xl font-bold">StudyG</span>
           </div>

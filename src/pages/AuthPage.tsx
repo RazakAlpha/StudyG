@@ -60,8 +60,8 @@ export default function AuthPage() {
         {/* Logo */}
         <div className="text-center mb-8">
           <Link to="/" className="inline-flex items-center gap-2 mb-6">
-            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center">
-              <BookOpen className="w-5 h-5 text-white" />
+            <div className="w-10 h-10 bg-transparent rounded-xl flex items-center justify-center">
+                <img src="/studyglogo.png" alt="StudyG" className="w-full h-full object-cover" />
             </div>
             <span className="text-2xl font-bold text-white">StudyG</span>
           </Link>
